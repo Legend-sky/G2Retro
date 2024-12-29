@@ -163,8 +163,8 @@ def brics_decomp(mol):
     if n_atoms == 1: #special case
         return [[0]], []
 
-    cliques = []
-    atom_clique_dict = {}
+    cliques = []            #用于存储每个片段（clique）的原子索引列表
+    atom_clique_dict = {}   #用于存储原子索引到其所属片段索引的映射
     
     mapnum_to_idx = get_idx_from_mapnum(mol)
     if len(mapnum_to_idx) == 0:
@@ -214,6 +214,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
 def tree_decomp(mol, decompose_ring=False):
+    '''
+    将分子进行树分解，分解为不同的团（clique）和边（edge）
+    '''
     n_atoms = mol.GetNumAtoms()
     if n_atoms == 1: #special case
         return [[0]], []

@@ -40,18 +40,19 @@ class MolEncoder(nn.Module):
             bond_size = sum([feature_embedding[i].shape[1] for i in range(4, 8)])
             feature_size = sum([feature_embedding[i].shape[1] for i in range(len(feature_embedding)-3-int(self.use_class))]) + 2 + int(self.use_atomic)
         else:
-            bond_size = self.E_b.shape[1]
+            bond_size = self.E_b.shape[1]   #3
+            #维度相加
             if self.use_tree: feature_size = sum([feature_embedding[i].shape[1] for i in range(1+int(self.use_class))])
-            else: feature_size = sum([feature_embedding[i].shape[1] for i in range(1)])
+            else: feature_size = sum([feature_embedding[i].shape[1] for i in range(1)]) #只有原子特征维度16 
         
         if self.use_class:
             self.reactions = feature_embedding[-1].to(device)
             feature_size += REACTION_CLS
         
         # Parameters for Atom-level Message Passing
-        input_size = feature_size + bond_size
+        input_size = feature_size + bond_size   #16+3=19
         if self.network_type == "gcn":
-            self.ampn = GCN(input_size, self.hidden_size, self.depthG)
+            self.ampn = GCN(input_size, self.hidden_size, self.depthG)  #19, 256, 10
         elif self.network_type == 'gru':
             self.ampn = GRU(input_size, self.hidden_size, self.depthG)
         

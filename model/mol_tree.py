@@ -46,28 +46,28 @@ class MolTree(object):
             if graph.nodes[idx]['idx'] == 0: graph.nodes[idx]['edit'] = 1
             else: graph.nodes[idx]['edit'] = 0
              
-            graph.nodes[idx]['charge'] = atom.GetFormalCharge()
-            graph.nodes[idx]['valence'] = atom.GetTotalValence()
-            graph.nodes[idx]['num_h'] = atom.GetTotalNumHs()
-            graph.nodes[idx]['aroma'] = atom.GetIsAromatic()
-            graph.nodes[idx]['atomic_num'] = atom.GetAtomicNum()
-            graph.nodes[idx]['in_ring'] = atom.IsInRing()
+            graph.nodes[idx]['charge'] = atom.GetFormalCharge()     #原子电荷
+            graph.nodes[idx]['valence'] = atom.GetTotalValence()    #原子价电子数
+            graph.nodes[idx]['num_h'] = atom.GetTotalNumHs()        #氢原子数
+            graph.nodes[idx]['aroma'] = atom.GetIsAromatic()        #是否是芳香环
+            graph.nodes[idx]['atomic_num'] = atom.GetAtomicNum()    #原子序数
+            graph.nodes[idx]['in_ring'] = atom.IsInRing()           #是否在环中
             
         for bond in mol.GetBonds():
             a1 = bond.GetBeginAtom().GetIdx()
             a2 = bond.GetEndAtom().GetIdx()
-            btype = BOND_LIST.index( bond.GetBondType() )
+            btype = BOND_LIST.index( bond.GetBondType() )           #键的类型：单键、双键、三键、芳香键
             graph[a1][a2]['label'] = btype
             graph[a2][a1]['label'] = btype
-            graph[a1][a2]['dir'] = 0
+            graph[a1][a2]['dir'] = 0        #构建的是有向图
             graph[a2][a1]['dir'] = 1
-            graph[a1][a2]['is_conju'] = bond.GetIsConjugated()
-            graph[a2][a1]['is_conju'] = bond.GetIsConjugated()
-            graph[a1][a2]['is_aroma'] = bond.GetIsAromatic()
-            graph[a2][a1]['is_aroma'] = bond.GetIsAromatic()
-            graph[a1][a2]['in_ring'] = bond.IsInRing()
-            graph[a2][a1]['in_ring'] = bond.IsInRing()
-                            
+            graph[a1][a2]['is_conju'] = bond.GetIsConjugated()      #是否是共轭键
+            graph[a2][a1]['is_conju'] = bond.GetIsConjugated()      #是否是共轭键
+            graph[a1][a2]['is_aroma'] = bond.GetIsAromatic()        #是否是芳香键
+            graph[a2][a1]['is_aroma'] = bond.GetIsAromatic()        #是否是芳香键
+            graph[a1][a2]['in_ring'] = bond.IsInRing()              #是否在环中
+            graph[a2][a1]['in_ring'] = bond.IsInRing()              #是否在环中
+
         return graph
         
     def build_mol_tree(self):
@@ -184,6 +184,11 @@ class MolTree(object):
                         self.mol_tree.nodes[i]['bonds'].append([ end_idx, begin_idx])
     
     def set_revise(self, revise_bonds, product=False, shuffle=False, use_dfs=True, charge_change_atoms=[], connect_atoms=[]):
+        '''
+        这个函数的作用是在分子树和分子图上跟踪和应用化学键的变更
+        遍历分子树的每个团（clique），检查是否有需要修改的化学键。
+        如果发现需要修改的化学键，根据变更类型（删除、类型改变等）更新分子树和分子图。
+        '''
         tree = self.mol_tree
         graph = self.mol_graph
         
@@ -314,7 +319,7 @@ class MolTree(object):
                 atoms = list(set([atom for bond in self.revise_bonds for atom in bond]))
                 neighbor_bonds = list(graph.edges(atoms))
             
-            change, ring = [[], []], [[], [], None]
+            change, ring = [[], []], [[], [], None] #TODO：ring在这里赋值了吗？
             if len(order) == 2 and order[0][-1] == 0 and order[1][-1] > 0:
                 # delete a bond and change a bond
                 change[0] = order[1]
@@ -994,6 +999,8 @@ def update_revise_atoms(product_tree, react_tree, shuffle=False, use_dfs=True):
     
     react_mol = react_tree.mol
     
+    #识别化学反应前后键的变化
+    #返回删除的键列表、添加的键列表、电荷变化的原子列表以及反应物和产物分子中参与反应的原子索引列表
     delete_change_edges, add_edges, charge_change_atoms, react_connect_atoms, product_connect_atoms = identify_revise_edges(product_mol, react_mol)
     
     if len(product_connect_atoms) == 0: raise ValueError("cannot have zero connect atoms")

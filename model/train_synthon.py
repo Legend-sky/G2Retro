@@ -3,6 +3,7 @@ import os
 os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 import sys
 import math
+import pdb
 import time
 import torch
 import pickle
@@ -29,7 +30,7 @@ if __name__ == "__main__":
     parser.add_argument('--train', type=str, default="../data/dfs_tensors_with_class.pkl", help='data path to training data')
     parser.add_argument('--vocab', type=str, default="../data/vocab.txt", help='data path to substructure vocabulary')
     parser.add_argument('--valid', type=str, default="../data/valid.csv", help='data path to validation dataset')
-    parser.add_argument('--save_dir', type=str, default=path+"/result/", help='data path to the directory used to save trained models')
+    parser.add_argument('--save_dir', type=str, default=path+"/result/synthon_models", help='data path to the directory used to save trained models')
     parser.add_argument('--load_epoch', type=int, default=0, help='an interger used to control the loaded model (i.e., if load_epoch==20, '+\
                         'the model save_dir+20.pkl would be loaded)')
     parser.add_argument('--ncpu', type=int, default=10, help='the number of cpus')
@@ -155,7 +156,7 @@ if __name__ == "__main__":
             model.zero_grad()
             
             try:
-                total_loss, loss, acc, rec, num = model(*batch, total_step)
+                total_loss, loss, acc, rec, num = model(*batch, total_step) #训练模型，主要用到模型中的forward函数
                 total_loss.backward()
             except Exception as e:
                 print(e)

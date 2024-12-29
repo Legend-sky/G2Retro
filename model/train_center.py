@@ -20,11 +20,11 @@ path = os.path.dirname(os.path.realpath(__file__))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--train', type=str, default="../data/dfs_tensors_with_class.pkl", help='data path to training data')
+    parser.add_argument('--train', type=str, default="../data/tensors.pkl", help='data path to training data')
     parser.add_argument('--valid', type=str, default="../data/valid.csv", help='data path to validation data')
     
     parser.add_argument('--vocab', type=str, default="../data/vocab.txt", help='data path to substructure vocabulary')
-    parser.add_argument('--save_dir', type=str, default="../result/", help='data path to the directory used to save trained models')
+    parser.add_argument('--save_dir', type=str, default="../result/center_models", help='data path to the directory used to save trained models')
     parser.add_argument('--load_epoch', type=int, default=0, help='an interger used to control the loaded model (i.e., if load_epoch==1000, '+\
                         'the model save_dir+1000.pkl would be loaded)')
     parser.add_argument('--ncpu', type=int, default=8, help='the number of cpus')
@@ -76,14 +76,14 @@ if __name__ == "__main__":
     
     # read vocabulary
     try:
-        vocab = [x.strip("\r\n ") for x in open(args.vocab)] 
+        vocab = [x.strip("\r\n ") for x in open(args.vocab)]    #83个词汇表
         vocab = Vocab(vocab)
     except:
         if os.path.exists(os.path.dirname(args.vocab)):
             vocab = args.vocab
         else:
             raise ValueError("directory of path for vocabulary does not exist: %s" % args.vocab)
-    avocab = common_atom_vocab
+    avocab = common_atom_vocab  #内容为['B','C', 'N', 'O', 'F', 'Mg', 'Si', 'P', 'S', 'Cl', 'Cu', 'Zn', 'Se', 'Br', 'Sn', 'I']的类
     
     # load data loader
     print("prepare dataloader....")
@@ -129,10 +129,16 @@ if __name__ == "__main__":
     total_step = args.size // args.batch_size * start_epoch
     # optimizer
     optimizer = optim.Adam(model.parameters(), lr=lr, amsgrad=True)
+
+    #学习率调度器，当模型的性能（如验证集上的准确率）不再提升时，会降低学习率，max表示最大化准确率
+    #patience=10表示如果性能在连续10个epoch内没有提升，学习率将会降低。
+    #factor=0.9表示学习率会乘以0.9，即降低10%
+    #threshold=0.01表示性能提升的最小阈值，只有当提升超过这个值时，才会认为性能有所提升
+    #verbose=True表示在控制台打印出学习率变化的信息
     scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', patience=10, factor=0.9, threshold=0.01, verbose=True)
     
-    param_norm = lambda m: math.sqrt(sum([p.norm().item() ** 2 for p in m.parameters()]))
-    grad_norm = lambda m: math.sqrt(sum([p.grad.norm().item() ** 2 for p in m.parameters() if p.grad is not None]))
+    param_norm = lambda m: math.sqrt(sum([p.norm().item() ** 2 for p in m.parameters()]))   #计算模型参数的范数
+    grad_norm = lambda m: math.sqrt(sum([p.grad.norm().item() ** 2 for p in m.parameters() if p.grad is not None])) #计算模型梯度的范数
     
     losses = np.zeros(4)
     acc_rec = np.zeros(5)
@@ -141,15 +147,19 @@ if __name__ == "__main__":
     t1 = time.time()
     optim_epoch = 0
     optim_val_acc, last_ie = 0, 0
-    for it, (batch, ie) in enumerate(loader):
+    for it, (batch, ie) in enumerate(loader):   #调用loader的__iter__方法
+        #启用 PyTorch 的异常检测，它会在反向传播过程中检查梯度计算是否存在问题
+        # （如梯度爆炸、梯度消失等），并报告潜在的错误
         with torch.autograd.set_detect_anomaly(True):
             total_step += 1
-            model.zero_grad()
+            model.zero_grad()   #梯度清零
             
-            total_loss, loss, acc, rec, num = model(*batch)
-            total_loss.backward()
+            total_loss, loss, acc, rec, num = model(*batch) #训练，前向传播,依次调用模型的 forward() 方法
+            total_loss.backward()   #反向传播
+
+            #clip_grad_norm_ 是一种防止梯度爆炸的技巧，它会将模型参数的梯度限制在一个阈值 args.clip_norm 内
             nn.utils.clip_grad_norm_(model.parameters(), args.clip_norm)
-            optimizer.step()
+            optimizer.step()    #优化器更新参数
         
         losses = losses + np.array([float(total_loss)]+[float(l) for l in loss])
         nums += np.array(num)
@@ -178,7 +188,7 @@ if __name__ == "__main__":
         if ie != last_ie:
             top_10_acc = []
             for valid_batch in valid_batches:
-                tmp_top_10_acc, _, _ = model.validate_centers(*valid_batch)
+                tmp_top_10_acc, _, _ = model.validate_centers(*valid_batch) #测试验证集
                 top_10_acc.append(tmp_top_10_acc)
             top_10_acc = np.concatenate(top_10_acc, axis=0)
             top_1_acc = np.sum(top_10_acc[:, 0] == 1) / top_10_acc.shape[0]

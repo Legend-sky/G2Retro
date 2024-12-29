@@ -280,7 +280,7 @@ class GCN(nn.Module):
         self.W_g = nn.Sequential(
             nn.Linear(input_size + hidden_size, hidden_size),
             nn.ReLU(),
-            nn.Linear(hidden_size, hidden_size)) .to(device)
+            nn.Linear(hidden_size, hidden_size)) .to(device)    #Sequential线性堆叠的模块容器,构建可学习参数W_g
             
         self.output_mess = nn.Sequential(
             nn.Linear(depth * hidden_size, int(depth / 2) * hidden_size),

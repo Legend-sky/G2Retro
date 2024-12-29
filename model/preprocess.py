@@ -17,9 +17,13 @@ def build_moltree(data, use_dfs=True, shuffle=False):
     """
     
     react_moltrees = []
-    react_smiles = data['rxn_smiles'].split(">>")[0]
-    prod_smiles = data['rxn_smiles'].split(">>")[1]
+    react_smiles = data['rxn_smiles'].split(">>")[0]    #反应物
+    prod_smiles = data['rxn_smiles'].split(">>")[1]     #产物
+    #BRICS（Building Retrosynthetic Combinatorial Libraries of Small Molecules）是一种基于化学反应规则的分子拆分方法。
+    # 这种方法定义了一组规则，用于识别分子中可以断裂的化学键，这些键与一系列可能的化学反应相匹配。
     
+    #在BRICS算法中，确定哪些键应该被断开是基于一组预定义的化学反应规则。
+    # 这些规则由有机化学家选定，主要考虑的是那些在常见化学反应中会形成的键。
     prod_moltree = MolTree(prod_smiles, use_brics=True, decompose_ring=True)
     react_moltree = MolTree(react_smiles)
     
@@ -31,6 +35,8 @@ def build_moltree(data, use_dfs=True, shuffle=False):
     vocab = set()
     
     synthon_tree = get_synthon_trees(react_moltree)
+    #存储需要在合成路径中特别关注或修改的合成子标签的词汇表。
+    # 这些合成子可能是化学反应的关键中间体或功能团，对于实现从反应物到目标分子的合成至关重要。
     for node in react_moltree.mol_tree.nodes:
         if react_moltree.mol_tree.nodes[node]['revise'] == 1:
             vocab.add(react_moltree.mol_tree.nodes[node]['label'])
@@ -41,6 +47,10 @@ def build_moltree(data, use_dfs=True, shuffle=False):
     
 
 def get_template(mol_tree1, mol_tree2):
+    '''
+    从两个分子树(mol_tree1 和 mol_tree2)中提取出模板
+    这些模板代表了分子中特定片段的SMILES表示
+    '''
     if len(mol_tree1.ring[0]) == 0:
         product_idxs = list(set([idx for bond in mol_tree1.order for idx in bond[:2] if idx != -1]))
     else:
@@ -95,17 +105,17 @@ if __name__ == "__main__":
     parser.add_argument('--ncpu', type=int, default=10, help="specify the number of CPUs used for preprocessing.")
     args = parser.parse_args()
 
-    cpu_count = mp.cpu_count()
+    cpu_count = mp.cpu_count()  #统计cpu核数，64核
     print("start...")
     pdata = []
     path = args.path
-    all_data = pd.read_csv(args.train, sep=',')
-    all_data_list = [all_data.iloc[i,:] for i in range(len(all_data))]
+    all_data = pd.read_csv(args.train, sep=',') #读取训练数据
+    all_data_list = [all_data.iloc[i,:] for i in range(len(all_data))]  #class,id,rxn_smiles,每组40000条，一共12万
     
     func = partial(build_moltree, use_dfs=not args.use_bfs, shuffle=args.shuffle)
     with Pool(processes=cpu_count) as pool:
         mol_trees = pool.map(func, all_data_list)
-    
+    #根据对应模板进行rxn反应式的分类
     templates = {}
     for product_tree, _, react_tree, _ in mol_trees:
         if product_tree is None or len(product_tree.order) == 1: continue
@@ -113,8 +123,8 @@ if __name__ == "__main__":
         if template not in templates: templates[template] = []
         templates[template].append((product_tree.smiles, react_tree.smiles))
     
-    template_count = {}
-    template_types = {}
+    template_count = {} #统计每个模板的数量
+    template_types = {} #统计每个模板的类型
     for template in templates:
         template_count[template] = len(templates[template])
         
@@ -172,9 +182,9 @@ if __name__ == "__main__":
             continue
         
         if len(prod_moltree.ring[0]) > 0:
-                removed_idxs.append(i)
-                print("%s,new ring,%s,%s" % (data['rxn_smiles'], prod_moltree.template[0], prod_moltree.template[1]))
-                continue
+            removed_idxs.append(i)
+            print("%s,new ring,%s,%s" % (data['rxn_smiles'], prod_moltree.template[0], prod_moltree.template[1]))
+            continue
         
         num_attach = 0
         for node in prod_moltree.mol_graph.nodes:
@@ -191,15 +201,15 @@ if __name__ == "__main__":
             if react_moltree.mol_graph[bond[0]][bond[1]]['label'] < 0: continue
             if react_moltree.mol.GetBondBetweenAtoms(bond[0], bond[1]).IsInRing():
                 num1 = react_moltree.mol.GetAtomWithIdx(bond[0]).GetAtomMapNum()
-                num2 = react_moltree.mol.GetAtomWithIdx(bond[0]).GetAtomMapNum()
+                num2 = react_moltree.mol.GetAtomWithIdx(bond[1]).GetAtomMapNum()    #TODO:这里应该是bond[1]吧
           
-                if num1 + num2 == abs(num1 - num2) and num1 + num2 != 0:
+                if num1 + num2 == abs(num1 - num2) and num1 + num2 != 0:    #如果两个原子的mapnum相等，说明是环
                     removed_idxs.append(i)
                     if_break = True
                     print("%s,build new ring,0" % (data['rxn_smiles']))
                     break
             if if_break: break
-    
+    print(len(removed_idxs))    #输出删除的数据数量
     if args.use_class:
         selected_mol_trees = [(mol_trees[i][0], mol_trees[i][1][0]) for i in range(len(mol_trees)) if i not in removed_idxs]
     else:

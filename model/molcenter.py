@@ -47,60 +47,60 @@ class MolCenter(nn.Module):
     """
     def __init__(self, vocab, avocab, args):
         super(MolCenter, self).__init__()
-        self.vocab = vocab
-        self.avocab = avocab
-        self.hidden_size = args.hidden_size
-        self.latent_size = args.latent_size
-        self.atom_size = atom_size = avocab.size()
-        self.use_brics = args.use_brics
-        self.use_feature = args.use_feature
-        self.use_tree = args.use_tree
+        self.vocab = vocab  #分子词汇表
+        self.avocab = avocab    #原子词汇表
+        self.hidden_size = args.hidden_size #隐藏层大小256
+        self.latent_size = args.latent_size #潜在空间大小
+        self.atom_size = atom_size = avocab.size()  #原子词汇表大小,16
+        self.use_brics = args.use_brics #是否使用BRICS特征
+        self.use_feature = args.use_feature     #是否使用特征
+        self.use_tree = args.use_tree   #是否使用树结构
         self.use_latent_attachatom = args.use_latent_attachatom
-        self.use_class = args.use_class 
-        self.use_mess  = args.use_mess  # whether using the bond features
+        self.use_class = args.use_class     #是否使用类别
+        self.use_mess  = args.use_mess  # 是否使用键特征
         
-        self.charge_offset = SUB_CHARGE_OFFSET
-        self.charge_change_num = SUB_CHARGE_CHANGE_NUM
-        self.charge_num = SUB_CHARGE_NUM
+        self.charge_offset = SUB_CHARGE_OFFSET  #1
+        self.charge_change_num = SUB_CHARGE_CHANGE_NUM  #3
+        self.charge_num = SUB_CHARGE_NUM    #3
         
         # embedding for substructures and atoms
-        self.E_a = torch.eye(atom_size).to(device)
-        if args.use_feature:
-            self.E_fv = torch.eye( VALENCE_NUM ).to(device)
+        self.E_a = torch.eye(atom_size).to(device)  #原子嵌入层，使用单位矩阵初始化,16x16单位矩阵
+        if args.use_feature:    #特征嵌入层
+            self.E_fv = torch.eye( VALENCE_NUM ).to(device) #8
             self.E_fg = torch.eye( self.charge_num ).to(device)
             
-            self.E_fh = torch.eye( HYDROGEN_NUM ).to(device)
-            self.E_fr = torch.eye( IS_RING_NUM ).to(device)
-            self.E_fc = torch.eye( IS_CONJU_NUM ).to(device)
-            self.E_fa = torch.eye( IS_AROMATIC_NUM ).to(device)
+            self.E_fh = torch.eye( HYDROGEN_NUM ).to(device)    #6
+            self.E_fr = torch.eye( IS_RING_NUM ).to(device)     #2
+            self.E_fc = torch.eye( IS_CONJU_NUM ).to(device)    #2
+            self.E_fa = torch.eye( IS_AROMATIC_NUM ).to(device) #2
         
-        self.E_b = torch.eye(BOND_SIZE).to(device)
-       
+        self.E_b = torch.eye(BOND_SIZE).to(device)  #键嵌入层，使用单位矩阵初始化，3x3单位矩阵
+
         if self.use_feature:
             feature_embedding = (self.E_a, self.E_fv, self.E_fg, self.E_fh, self.E_fr, self.E_fc, self.E_fa, self.E_b)
         else:
             feature_embedding = (self.E_a, self.E_b) 
 
         if self.use_class:
-            self.reactions = torch.eye( REACTION_CLS ).to(device)
+            self.reactions = torch.eye( REACTION_CLS ).to(device)   #10
             feature_embedding += (self.reactions, )
         
         # number of bond charge types: delete bond; single; double; triple;; 
-        self.E_bc = torch.eye(4).to(device)
+        self.E_bc = torch.eye(4).to(device) #键电荷类型的嵌入层，有4种键电荷类型（删除键、单键、双键、三键）
         
-        # encoder
+        # encoder：使用 MolEncoder 类初始化编码器，用于编码分子结构
         self.encoder = MolEncoder(self.atom_size, feature_embedding, args=args)
-        # weight for atom center function
+        # 原子中心函数权重
         self.W_ta = nn.Sequential(nn.Linear(self.hidden_size * 2, self.hidden_size),
                                   nn.ReLU(),
                                   nn.Linear(self.hidden_size, 1)).to(device)
         
-        # weight for bond center function
+        # 键中心函数权重
         self.W_tb = nn.Sequential(nn.Linear(self.hidden_size * 2, self.hidden_size),
                                   nn.ReLU(),
                                   nn.Linear(self.hidden_size, 4)).to(device)
         
-        # weight for bond change function
+        # 键变化函数权重
         self.W_bc = nn.Sequential(nn.Linear(self.hidden_size * 3, self.hidden_size),
                                   nn.ReLU(),
                                   nn.Linear(self.hidden_size, 4)).to(device)
@@ -109,7 +109,7 @@ class MolCenter(nn.Module):
                                  nn.ReLU(),
                                  nn.Linear(self.hidden_size, self.hidden_size)).to(device)
         
-        # weight for atom charge change function
+        # 原子电荷变化函数权重
         self.W_tac = nn.Sequential(nn.Linear(self.hidden_size * 2, self.hidden_size),
                                    nn.ReLU(),
                                    nn.Linear(self.hidden_size, self.charge_change_num)).to(device)
@@ -131,7 +131,8 @@ class MolCenter(nn.Module):
             self.U_t1 = nn.Sequential(nn.Linear(BOND_SIZE + self.hidden_size * 4, self.hidden_size),
                                    nn.ReLU(),
                                    nn.Linear(self.hidden_size, self.hidden_size)).to(device)
-            
+        
+        #计算键电荷和原子电荷的交叉熵损失
         self.bond_charge_loss = nn.CrossEntropyLoss()
         self.atom_charge_loss = nn.CrossEntropyLoss()
     

@@ -53,7 +53,7 @@ class PairTreeFolder(object):
                     with open(self.path + path, 'rb') as f:
                         mol_trees = pickle.load(f)
                         
-                if self.shuffle or (not self.shuffle and i == 0):
+                if self.shuffle or (not self.shuffle and i == 0):   # shuffle默认为False
                     batches = [mol_trees[j : j + self.batch_size] for j in range(0, len(mol_trees), self.batch_size)]
                     
                     if len(batches[-1]) < self.batch_size:
