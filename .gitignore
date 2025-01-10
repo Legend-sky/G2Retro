@@ -1,0 +1,4 @@
+result/
+*.pkl
+data/data.csv
+data/template.txt

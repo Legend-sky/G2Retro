@@ -134,7 +134,8 @@ class MolEncoder(nn.Module):
             try:
                 hnode = self.E_a.index_select(index=fnode, dim=0)
             except:
-                pdb.set_trace()
+                # pdb.set_trace()
+                pass
         
         if self.use_class and classes is not None:
             cls_idxs = torch.zeros((fnode.shape[0],), dtype=torch.int32).to(device)
@@ -142,7 +143,8 @@ class MolEncoder(nn.Module):
                 try:
                     cls_idxs[scope[0]:scope[0]+scope[1]] = classes[i]-1
                 except:
-                    pdb.set_trace()
+                    # pdb.set_trace()
+                    pass
             hnode7 = self.reactions.index_select(index=cls_idxs, dim=0)
             hnode = torch.cat( (hnode, hnode7), dim=1)
         
@@ -186,7 +188,8 @@ class MolEncoder(nn.Module):
         try:
             fmess1 = hnode.index_select(index=fmess[:, 0], dim=0)
         except:
-            pdb.set_trace()
+            # pdb.set_trace()
+            pass
         fmess2 = self.embed_bond_feature(fmess)
         
         hmess = torch.cat([fmess1, fmess2], dim=-1)

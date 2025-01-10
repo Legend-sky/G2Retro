@@ -240,13 +240,18 @@ class MolCenter(nn.Module):
         
     def get_center_logits(self, product_embed_vecs, cand_center_embeds, cand_center_idxs, target, is_bond=False, is_ring=False):
         """ get the logits for center prediction
+        生成每个候选反应物中心的预测分数，保存在target中
         """
+        #选择嵌入向量，通过 index_select_ND 从 product_embed_vecs 中选取出与 cand_center_idxs 相对应的产品嵌入向量
         select_product_embed_vecs = index_select_ND(product_embed_vecs, 0, cand_center_idxs)
         
+        #连接候选中心嵌入向量和产品嵌入向量
         center_hiddens = torch.cat( (cand_center_embeds, select_product_embed_vecs), dim=1)
         
         if is_bond:
+            #线性变换 W_tb（一个全连接层）对拼接后的 center_hiddens 进行变换，得到 center_logits，即键类型反应中心的 logits
             center_logits = self.W_tb( center_hiddens )
+            #将 center_logits 中的值填充到 target 中
             target.index_put_([torch.LongTensor([0, 1, 2, 3]).repeat(len(cand_center_idxs)).to(device), torch.repeat_interleave(cand_center_idxs, 4)], center_logits.flatten())
         elif is_ring:
             center_logits = self.W_tr( center_hiddens )
@@ -522,31 +527,40 @@ class MolCenter(nn.Module):
     def test_centers(self, product_embed_vecs, product_atom_vecs, product_trees, product_bond_tensors, product_graph_scopes):
         """
         """
-        product_hiddens = []
+        product_hiddens = []    #存储每个产物树的嵌入向量
         labels, lengths = [], []
         cand_bond_types = []
         # data for next bond charge change prediction
         bond_elec_types, bond_elec_idxs = [], []
         # data for next atom charge change prediction
         atom_charge_data = []
+
+        #存储候选键和原子对的索引
         cand_is_bond_idxs, cand_is_atom_idxs = [], []
         cand_bond_atom_idxs, cand_atom_atom_idxs = [], []
+        #一个字典，用来映射键索引到候选键的索引
         cand_bond_idx_dict = {}
         
+        #计算分子中键、原子和候选中心的偏移量
         bonds_offset, atoms_offset, cand_offset = 1, 1, 0
-        for i, tree in enumerate(product_trees):
+        for i, tree in enumerate(product_trees):    #遍历每个产物树
+            #获取当前反应树的键和原子的数量
             bond_size, atom_size = tree.mol_graph.number_of_edges(), tree.mol_graph.number_of_nodes()
             
+            #提取出当前反应树的键信息，并筛选出方向性的键
             bond_tensor = product_bond_tensors[bonds_offset:bonds_offset+bond_size, :]
             one_dir_bond_tensor = torch.where(bond_tensor[:, -1] == 0)[0]
+
             for j, val in enumerate(one_dir_bond_tensor): cand_bond_idx_dict[val.item() + bonds_offset] = len(cand_is_bond_idxs) + j
             bond_tensor = bond_tensor[one_dir_bond_tensor, :]
             cand_bond_size = bond_tensor.shape[0]
             
+            #将符合条件的键添加到cand_bond_atom_idxs（候选键的原子对索引）和cand_bond_types（候选键的类型）
             cand_bond_types.append(bond_tensor[:, 2:])
             cand_bond_atom_idxs.append(bond_tensor[:, :2])
             cand_atom_atom_idxs.extend([j for j in range(atoms_offset, atoms_offset + atom_size)])
             
+            #计算反应树中所有候选键和原子的总数，储存在lengths中
             lengths.append( (cand_bond_size, atom_size, 4 * cand_bond_size + atom_size, len(cand_is_bond_idxs), len(cand_is_atom_idxs)) )
             
             cand_is_bond_idxs.extend([j for j in range(cand_offset, cand_offset + cand_bond_size)])
@@ -555,6 +569,8 @@ class MolCenter(nn.Module):
             bonds_offset += bond_size
             atoms_offset += atom_size
             cand_offset  += (cand_bond_size + atom_size)
+
+            #将当前产物树的嵌入向量重复cand_bond_size + atom_size次，并添加到product_hiddens中
             product_embed_vec = product_embed_vecs[i].repeat( (cand_bond_size + atom_size, 1) )
             product_hiddens.append(product_embed_vec)
         
@@ -567,13 +583,17 @@ class MolCenter(nn.Module):
         cand_bond_types = torch.cat(cand_bond_types, dim=0).to(device)
         
         product_hiddens = torch.cat( product_hiddens, dim=0)
+
+        #获取候选中心的嵌入向量
         cand_atoms_embeds, cand_bonds_embeds = self.get_center_embeds(product_atom_vecs, cand_bond_types, cand_bond_atom_idxs, cand_atom_atom_idxs)
         
         cand_logits = torch.empty( (4, len(cand_atom_atom_idxs) + len(cand_bond_atom_idxs)) ).to(device)
         
+        #为原子和键计算被预测为反应中心的可能性
         self.get_center_logits( product_hiddens, cand_atoms_embeds, cand_is_atom_idxs, cand_logits, is_bond=False)
         self.get_center_logits( product_hiddens, cand_bonds_embeds, cand_is_bond_idxs, cand_logits, is_bond=True) 
          
+        #根据lengths中的信息，为每个树的候选反应中心填充相应的logits。在此过程中，pad_logits会被用来填充位置
         pad_logits = torch.ones((len(product_graph_scopes), max([length[2] for length in lengths]))).to(device) * -100
         
         start = 0
@@ -584,20 +604,22 @@ class MolCenter(nn.Module):
             start += (num_bond + num_atom)
         
         cand_lengths = torch.LongTensor([length[2] for length in lengths]).to(device)
+        #计算候选中心的logits的rank和log_probs，表示各个候选反应中心的可能性
         rank_log_probs, log_probs = variable_likelihood(pad_logits, cand_lengths)
+        #得到每个反应中心的排名
         center_ranks = torch.argsort(rank_log_probs, descending=True, dim=1)
         
+        #选择排名靠前的反应中心，保留它们的log_probs，即最可能的反应中心的得分
         top_k_log_probs = -10e5 *  torch.ones( (log_probs.shape[0], log_probs.shape[1]) ).to(device)
-        
         for i in range(len(lengths)):
             length = 4 * lengths[i][0] + lengths[i][1]
-
-            
             for j, idx in enumerate(center_ranks[i,:length]):
                 top_k_log_probs[i, j] = log_probs[i, idx]
         
+        #next_charge_data包含了关于候选键和原子的相关信息，包括它们的嵌入、类型、索引等，用于后续的电荷预测
         next_charge_data = cand_bond_atom_idxs, cand_atom_atom_idxs, lengths, cand_atoms_embeds, cand_is_atom_idxs, cand_bonds_embeds, cand_is_bond_idxs, cand_bond_idx_dict
         
+        #返回各反应中心的排名center_ranks、最可能的反应中心的得分top_k_log_probs和用于电荷预测的候选数据next_charge_data
         return center_ranks, top_k_log_probs, next_charge_data
     
     def get_synthon_padatom_vecs(self, react_tree, synthon_tree, react_atom_vecs, synthon_atom_vecs):
@@ -723,8 +745,13 @@ class MolCenter(nn.Module):
         
         product_data = (product_embed_vecs, product_tensors, product_atom_vecs, product_trees)
         
+        #self.test_centers() 方法对反应中心进行预测
+        # 返回预测的中心排名 (center_ranks)、
+        # 对数概率 (center_log_probs) 
+        # 和用于进一步计算的电荷数据 (next_charge_data)
         center_ranks, center_log_probs, next_charge_data = self.test_centers(product_embed_vecs, product_atom_vecs, product_trees, product_tensors[0][1], product_tensors[0][-1])
         
+        #top_k_reacts 和 buffer_log_probs 是分别存储前 knum 个反应和它们的对数概率的列表。
         top_k_reacts = [[] for tree in product_trees]
         buffer_log_probs = [[] for tree in product_trees]
         top_k_centers = [[] for tree in product_trees]
@@ -741,9 +768,10 @@ class MolCenter(nn.Module):
             copy_product_trees = copy.deepcopy(product_trees)
             
             for j, tree in enumerate(copy_product_trees):
-                if center_ranks[j][i] == -1: continue
+                if center_ranks[j][i] == -1: continue   #没有有效的反应中心，跳过
                 bond_num = length_scope[j][0]
                 
+                #根据反应中心的排名信息（center_ranks[j][i]），确定反应中心的位置，计算与其相关的原子索引 atom_idx
                 if center_ranks[j][i] < bond_num * 4:
                     center_idx = center_ranks[j][i] // 4 + length_scope[j][3]
                     atom_idx = [idx.item() - length_scope[j][4] -1 for idx in list(cand_bond_atom_idxs[center_idx])]
@@ -751,17 +779,18 @@ class MolCenter(nn.Module):
                     center_idx = center_ranks[j][i] - 4 * bond_num + length_scope[j][4]
                     atom_idx = [cand_atom_atom_idxs[center_idx].item() - length_scope[j][4] - 1]
                 
+                #根据 atom_idx 来决定是否是原子变化（len(atom_idx) == 1）还是键变化（len(atom_idx) == 2）
                 if len(atom_idx) == 2:
                     tmp = tree.mol_graph[atom_idx[0]][atom_idx[1]]
                 
-                # is atom
+                # is atom,对于每个原子，计算电荷变化更新 atom_atom_charge_data 和 atom_atom_charge_batch_idxs
                 if len(atom_idx) == 1:
                     aidx = atom_idx[0]
                     
                     atom_embed_idx = aidx + length_scope[j][4] + 1
                     atom_atom_charge_data.append( (atom_embed_idx, 0, -1) )
                     atom_atom_charge_batch_idxs.append(j)
-                else:
+                else:   #如果反应中心涉及键变化，则会调用 self.test_bond_change() 方法，计算新的化学键及其类型，并更新反应树的结构。
                     aidx1, aidx2 = atom_idx
                     
                     bond_elec_idx = center_ranks[j][i] // 4 + length_scope[j][3]
@@ -798,7 +827,8 @@ class MolCenter(nn.Module):
                     bond_atom_idxs.append(bond_atom_idx)
                     
                     bond_labels.append( bond_label )
-                    
+            
+            #电荷变化的候选：根据预测的电荷变化，分子中可能有原子的电荷发生改变。在此步骤中，电荷变化会被存储并进行后续处理
             atom_center_embeds = torch.zeros( (len(atom_atom_charge_data), self.hidden_size) ).to(device)
             atom_atom_charge_hiddens, _ = self.get_atom_charge_hiddens(atom_atom_charge_data, atom_center_embeds, product_atom_vecs, has_label=False)
             atom_atom_charge_logits = self.W_tac( atom_atom_charge_hiddens )
@@ -808,11 +838,12 @@ class MolCenter(nn.Module):
             bond_atom_center_hiddens = self.get_center_hiddens( bond_center_idxs, bond_center_types, cand_bond_embeds )
             bond_elec_dicts = {tmp[0]: j for j, tmp in enumerate(bond_elec_types)}
             
+            #反应树的生成：根据电荷变化和键变化，尝试构建新的反应树，并生成反应物和产物的 SMILES 表示（使用 get_smiles 函数）
             for j, old_tree in enumerate(copy_product_trees):
                 if center_ranks[j][i] == -1: continue
                 tmp_atom_charge_data = []
                 
-                if j in bond_elec_dicts:
+                if j in bond_elec_dicts:    #键变化
                     idx = bond_elec_dicts[j]
                     bond_center_atom_idx = bond_atom_idxs[idx]
                     bond_center_hidden = bond_atom_center_hiddens[idx]
@@ -827,7 +858,7 @@ class MolCenter(nn.Module):
                     
                     atom_idx    = [tidx-length_scope[j][4]-1 for tidx in bond_center_atom_idx]
                     atom_labels = [old_tree.mol_graph.nodes[tidx]['charge'] for tidx in atom_idx]
-                    # predict atom charge change
+                    # 预测原子电荷变化
                     atom_charge_hiddens = self.get_atom_charge_hiddens2(bond_center_atom_idx, bond_center_hidden, product_atom_vecs, has_label=False)
                     atom_charge_logits = self.W_tac(atom_charge_hiddens)
                     
@@ -838,6 +869,7 @@ class MolCenter(nn.Module):
                     
                     atom_charge_ranks = get_ranked_atom_charges(atom_charge_likelihoods)
                     
+                    #排序和筛选：根据对数概率（center_log_probs[j, i]），对预测的反应进行排序，选择最可能的前 knum 个反应
                     for m, (charges, likelihood) in enumerate(atom_charge_ranks[:2]):
                         all_log_likelihoods.append( (count, likelihood + center_log_probs[j, i].item()) )
                         all_combs.append( charges )
@@ -855,7 +887,7 @@ class MolCenter(nn.Module):
                         
                         for n, charge in enumerate(charges):
                             if charge == self.charge_offset: continue
-                            # lose one charge
+                            # 失去一个电荷
                             new_atom_charge = atom_labels[n] - (charge - self.charge_offset)
                             
                             if new_atom_charge < -self.charge_offset or new_atom_charge > self.charge_offset: continue
@@ -867,7 +899,7 @@ class MolCenter(nn.Module):
                             mols = graph_to_mol(old_tree.mol_graph)
                             reacts = get_smiles(mols)
                         except:
-                            # charge is not allowed, delete new charge.
+                            # 电荷不允许，删除新电荷
                             for aidx in changed_atom_idxs:
                                 if 'new_charge' in old_tree.mol_graph.nodes[aidx]:
                                     del old_tree.mol_graph.nodes[aidx]['new_charge']
@@ -887,7 +919,7 @@ class MolCenter(nn.Module):
                     for node in old_tree.mol_graph.nodes:
                         if 'new_charge' in old_tree.mol_graph.nodes[node]:
                             del old_tree.mol_graph.nodes[node]['new_charge']
-                else:
+                else:   #原子变化
                     idx = atom_atom_charge_batch_idxs.index(j)
                     charge_ranks = atom_atom_charge_ranks[idx]
                     
@@ -906,7 +938,7 @@ class MolCenter(nn.Module):
                             
                             old_tree.mol_graph.nodes[aidx]['new_charge'] = new_atom_charge if type(new_atom_charge) is int else new_atom_charge.item()
                             changed_atom_idxs.append(aidx)
-                        
+                        #排序和筛选：根据对数概率（center_log_probs[j, i]），对预测的反应进行排序，选择最可能的前 knum 个反应
                         likelihood = atom_atom_charge_likelihoods[idx, charge].item() + center_log_probs[j, i].item()
                         
                         try:
@@ -930,7 +962,7 @@ class MolCenter(nn.Module):
                     
                     if aidx <len(old_tree.mol_graph.nodes) and 'new_charge' in old_tree.mol_graph.nodes[aidx]:
                         del old_tree.mol_graph.nodes[aidx]['new_charge']
-        
+        #对于每个反应预测，最终将反应物的 SMILES 表示和对应的分子图（mol_graph）存储在 top_k_reacts 和 top_k_centers 中
         for i in range(len(top_k_reacts)):
             log_probs = buffer_log_probs[i]
             
@@ -950,7 +982,8 @@ class MolCenter(nn.Module):
         
         top_k_react_data = [None for _ in range(knum)]
         top_k_synthon_trees = [None for _ in range(knum)]
-                
+        
+        #最终，返回前 knum 个最可能的反应树（top_k_synthon_trees）和它们的对数概率（buffer_log_probs）
         for i in range(knum):
             reacts_trees = [None for _ in range(len(product_trees))]
             react_id_edges = []
